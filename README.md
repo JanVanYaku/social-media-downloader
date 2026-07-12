@@ -1,3 +1,8 @@
+#######################################################################
+# Author: Lehlohonolo Adolf Matobakele  
+# Email: lehlohonolo.matobakele@gov.ls
+# Contacxt: 00266 62320704
+#######################################################################
 # Social Media Downloader App
 
 Python CLI for downloading a user-provided media link as either best-quality video or best-quality audio.
@@ -89,3 +94,4 @@ Official docs used:
 
 - [yt-dlp GitHub repository](https://github.com/yt-dlp/yt-dlp)
 - [Embedding yt-dlp in Python](https://yt-dlp-yt-dlp.mintlify.app/advanced/embedding)
+

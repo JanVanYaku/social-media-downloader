@@ -1,3 +1,8 @@
+#######################################################################
+# Author: Lehlohonolo Adolf Matobakele  
+# Email: lehlohonolo.matobakele@gov.ls
+# Contacxt: 00266 62320704
+#######################################################################
 __pycache__/
 *.py[cod]
 .venv/
@@ -8,3 +13,4 @@ downloads/
 *.temp.*
 cookies.txt
 *.cookies.txt
+
