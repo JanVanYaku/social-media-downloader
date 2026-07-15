@@ -11,6 +11,10 @@ It uses `yt-dlp`, which supports thousands of media sites and is commonly used f
 
 Use this only for media you own, have permission to download, or may lawfully save. This app does not bypass DRM.
 
+## Screenshot
+
+![Demo screenshot](assets/demo.svg)
+
 ## Setup
 
 ```powershell
