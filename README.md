@@ -25,7 +25,9 @@ python -m pip install -r requirements.txt
 
 ## Interactive Use
 
-Run the app, paste the link, then choose `audio` or `video`:
+Run the app, paste the link, then choose whether to download one item or the full playlist when the link looks like a playlist. Then choose `audio` or `video`.
+
+For video, the app asks for a quality such as `1080`, `720`, `480`, or `best`. For audio, the app asks for the output format and defaults to `mp3`.
 
 ```powershell
 python .\social_media_downloader.py
@@ -37,7 +39,19 @@ python .\social_media_downloader.py
 python .\social_media_downloader.py "https://example.com/media-link" --mode video
 ```
 
-The video mode asks yt-dlp for the best available video plus best available audio, then merges them when needed.
+The video mode asks which quality you want before download. By default, interactive use chooses up to `1080p` instead of always downloading the largest possible file.
+
+Download up to 720p:
+
+```powershell
+python .\social_media_downloader.py "https://example.com/media-link" --mode video --video-quality 720
+```
+
+Force the original best-quality behavior:
+
+```powershell
+python .\social_media_downloader.py "https://example.com/media-link" --mode video --video-quality best
+```
 
 Force a common container:
 
@@ -50,7 +64,7 @@ python .\social_media_downloader.py "https://example.com/media-link" --mode vide
 Best native audio:
 
 ```powershell
-python .\social_media_downloader.py "https://example.com/media-link" --mode audio
+python .\social_media_downloader.py "https://example.com/media-link" --mode audio --audio-format best
 ```
 
 Convert to MP3:
@@ -58,6 +72,64 @@ Convert to MP3:
 ```powershell
 python .\social_media_downloader.py "https://example.com/media-link" --mode audio --audio-format mp3
 ```
+
+In interactive mode, audio defaults to `mp3` so YouTube/YouTube Music downloads do not surprise you with `.opus` unless you choose `opus` or `best`.
+
+## Download One Song Or A Full Playlist
+
+Interactive mode asks when the URL looks like a YouTube playlist, channel, or other multi-item link:
+
+```powershell
+python .\social_media_downloader.py
+```
+
+For one song/video only:
+
+```powershell
+python .\social_media_downloader.py "https://www.youtube.com/watch?v=VIDEO_ID&list=PLAYLIST_ID" --mode audio --playlist-mode single --audio-format mp3
+```
+
+For the full playlist:
+
+```powershell
+python .\social_media_downloader.py "https://www.youtube.com/playlist?list=PLAYLIST_ID" --mode audio --playlist-mode playlist --audio-format mp3
+```
+
+Playlist mode skips unavailable, deleted, or private items by default so one bad item does not stop the whole download.
+
+If YouTube says something like `Downloading 156 items of 299`, the app is not limiting the playlist to 156. That means YouTube reported 299 playlist slots, but `yt-dlp` could only see 156 unique/downloadable entries in the current session. The missing entries are usually private, deleted, repeated duplicates, region blocked, age restricted, hidden, or only visible to a logged-in account.
+
+To explicitly request the whole visible range:
+
+```powershell
+python .\social_media_downloader.py "https://www.youtube.com/playlist?list=PLAYLIST_ID" --mode audio --playlist-mode playlist --audio-format mp3 --playlist-items 1-299
+```
+
+If you can play the missing songs in your browser, try using your logged-in browser cookies:
+
+```powershell
+python .\social_media_downloader.py "https://www.youtube.com/playlist?list=PLAYLIST_ID" --mode audio --playlist-mode playlist --audio-format mp3 --playlist-items 1-299 --cookies-from-browser chrome
+```
+
+You can also retry only the second part of a playlist:
+
+```powershell
+python .\social_media_downloader.py "https://www.youtube.com/playlist?list=PLAYLIST_ID" --mode audio --playlist-mode playlist --audio-format mp3 --playlist-items 157-299
+```
+
+If you want the download to stop as soon as one playlist item fails:
+
+```powershell
+python .\social_media_downloader.py "https://www.youtube.com/playlist?list=PLAYLIST_ID" --mode audio --playlist-mode playlist --audio-format mp3 --stop-on-error
+```
+
+For a video playlist capped at 720p:
+
+```powershell
+python .\social_media_downloader.py "https://www.youtube.com/playlist?list=PLAYLIST_ID" --mode video --playlist-mode playlist --video-quality 720
+```
+
+`--allow-playlist` still works and is the same as choosing `--playlist-mode playlist`.
 
 ## Output Folder
 
@@ -75,6 +147,12 @@ Some TikTok, Instagram, Facebook, Twitter/X, or age/private YouTube links may re
 python .\social_media_downloader.py "https://example.com/private-link" --mode video --cookies .\cookies.txt
 ```
 
+Or let `yt-dlp` read cookies directly from an installed browser:
+
+```powershell
+python .\social_media_downloader.py "https://example.com/private-link" --mode video --cookies-from-browser chrome
+```
+
 Do not commit cookies or secrets. The `.gitignore` excludes common cookie filenames.
 
 ## Useful Options
@@ -82,10 +160,20 @@ Do not commit cookies or secrets. The `.gitignore` excludes common cookie filena
 ```powershell
 python .\social_media_downloader.py "URL" --mode video --write-info-json --write-thumbnail
 python .\social_media_downloader.py "URL" --mode audio --download-archive .\downloaded.txt
-python .\social_media_downloader.py "URL" --mode video --allow-playlist
+python .\social_media_downloader.py "URL" --mode video --playlist-mode playlist
+python .\social_media_downloader.py "URL" --mode video --video-quality 480
+python .\social_media_downloader.py "URL" --mode audio --audio-format mp3
+python .\social_media_downloader.py "URL" --mode audio --playlist-mode playlist --stop-on-error
+python .\social_media_downloader.py "URL" --mode audio --playlist-mode playlist --playlist-items 1-299 --cookies-from-browser chrome
 ```
 
-Playlists are disabled by default so a pasted profile/channel/playlist URL does not unexpectedly download many files.
+Playlist URLs default to asking in interactive use. In non-interactive use, pass `--playlist-mode single` or `--playlist-mode playlist` to make the choice explicit.
+
+If YouTube or another site fails with a local certificate verification error, first try updating `yt-dlp` and your Python certificates. As a last resort, you can pass:
+
+```powershell
+python .\social_media_downloader.py "URL" --mode audio --no-check-certificate
+```
 
 ## Notes
 
