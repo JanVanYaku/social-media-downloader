@@ -75,6 +75,30 @@ python .\social_media_downloader.py "https://example.com/media-link" --mode audi
 
 In interactive mode, audio defaults to `mp3` so YouTube/YouTube Music downloads do not surprise you with `.opus` unless you choose `opus` or `best`.
 
+Audio downloads embed available title, artist, album/date metadata, and cover art by default. Playlist audio filenames also use music-friendly fields when the site exposes them:
+
+```text
+001 - Artist Name - Song Title [video_id].mp3
+```
+
+If the site only exposes weak metadata, such as titles named `1`, `2`, or `3`, the downloader cannot invent the real song title. In that case, try the same playlist with logged-in cookies:
+
+```powershell
+python .\social_media_downloader.py "https://www.youtube.com/playlist?list=PLAYLIST_ID" --mode audio --playlist-mode playlist --audio-format mp3 --cookies-from-browser chrome
+```
+
+To also keep the thumbnail image as a separate file next to the MP3:
+
+```powershell
+python .\social_media_downloader.py "https://example.com/media-link" --mode audio --audio-format mp3 --write-thumbnail
+```
+
+To disable audio tagging or cover-art embedding:
+
+```powershell
+python .\social_media_downloader.py "https://example.com/media-link" --mode audio --no-embed-metadata --no-embed-thumbnail
+```
+
 ## Download One Song Or A Full Playlist
 
 Interactive mode asks when the URL looks like a YouTube playlist, channel, or other multi-item link:
@@ -163,6 +187,7 @@ python .\social_media_downloader.py "URL" --mode audio --download-archive .\down
 python .\social_media_downloader.py "URL" --mode video --playlist-mode playlist
 python .\social_media_downloader.py "URL" --mode video --video-quality 480
 python .\social_media_downloader.py "URL" --mode audio --audio-format mp3
+python .\social_media_downloader.py "URL" --mode audio --audio-format mp3 --write-thumbnail
 python .\social_media_downloader.py "URL" --mode audio --playlist-mode playlist --stop-on-error
 python .\social_media_downloader.py "URL" --mode audio --playlist-mode playlist --playlist-items 1-299 --cookies-from-browser chrome
 ```

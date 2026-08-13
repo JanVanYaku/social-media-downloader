@@ -21,6 +21,8 @@ SUPPORTED_VIDEO_CONTAINERS = {"auto", "mkv", "mp4", "webm"}
 SUPPORTED_COOKIE_BROWSERS = {"brave", "chrome", "chromium", "edge", "firefox", "opera", "safari", "vivaldi", "whale"}
 DEFAULT_VIDEO_QUALITY = "1080"
 VIDEO_QUALITY_PRESETS = ["best", "2160", "1440", "1080", "720", "480", "360", "240"]
+AUDIO_FILENAME = "%(artist,creator,uploader|Unknown Artist).120B - %(track,title|Unknown Title).120B [%(id)s].%(ext)s"
+AUDIO_PLAYLIST_FILENAME = "%(playlist_index)03d - %(artist,creator,uploader|Unknown Artist).120B - %(track,title|Unknown Title).120B [%(id)s].%(ext)s"
 
 
 class SimpleLogger:
@@ -181,19 +183,21 @@ def sanitize_filename_fragment(value: str | None, fallback: str) -> str:
     return text[:180] or fallback
 
 
-def build_output_template(output_dir: Path, flat: bool, allow_playlist: bool) -> str:
+def build_output_template(output_dir: Path, flat: bool, allow_playlist: bool, audio: bool = False) -> str:
+    file_template = AUDIO_PLAYLIST_FILENAME if audio and allow_playlist else AUDIO_FILENAME if audio else None
+
     if flat:
         if allow_playlist:
-            return str(output_dir / "%(playlist_index)03d - %(title).180B [%(id)s].%(ext)s")
-        return str(output_dir / "%(title).180B [%(id)s].%(ext)s")
+            return str(output_dir / (file_template or "%(playlist_index)03d - %(title).180B [%(id)s].%(ext)s"))
+        return str(output_dir / (file_template or "%(title).180B [%(id)s].%(ext)s"))
     if allow_playlist:
         return str(
             output_dir
             / "%(extractor_key)s"
             / "%(playlist_title).180B"
-            / "%(playlist_index)03d - %(title).180B [%(id)s].%(ext)s"
+            / (file_template or "%(playlist_index)03d - %(title).180B [%(id)s].%(ext)s")
         )
-    return str(output_dir / "%(extractor_key)s" / "%(title).180B [%(id)s].%(ext)s")
+    return str(output_dir / "%(extractor_key)s" / (file_template or "%(title).180B [%(id)s].%(ext)s"))
 
 
 def parse_rate_limit(value: str | None) -> int | None:
@@ -210,12 +214,12 @@ def parse_rate_limit(value: str | None) -> int | None:
     return int(amount * multipliers[unit])
 
 
-def common_options(args: argparse.Namespace) -> dict[str, Any]:
+def common_options(args: argparse.Namespace, audio: bool = False) -> dict[str, Any]:
     skip_playlist_errors = bool(args.allow_playlist and not getattr(args, "stop_on_error", False))
     options: dict[str, Any] = {
         "logger": SimpleLogger(),
         "noplaylist": not args.allow_playlist,
-        "outtmpl": build_output_template(args.output_dir, args.flat, args.allow_playlist),
+        "outtmpl": build_output_template(args.output_dir, args.flat, args.allow_playlist, audio),
         "retries": args.retries,
         "fragment_retries": args.retries,
         "windowsfilenames": True,
@@ -269,15 +273,33 @@ def video_options(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def audio_options(args: argparse.Namespace) -> dict[str, Any]:
-    options = common_options(args)
+    options = common_options(args, audio=True)
     options["format"] = "bestaudio/best"
-    options["postprocessors"] = [
+    postprocessors: list[dict[str, Any]] = [
         {
             "key": "FFmpegExtractAudio",
             "preferredcodec": normalize_audio_format(args.audio_format),
             "preferredquality": args.audio_quality,
         }
     ]
+    if not args.no_embed_metadata:
+        postprocessors.append(
+            {
+                "key": "FFmpegMetadata",
+                "add_metadata": True,
+                "add_chapters": False,
+                "add_infojson": False,
+            }
+        )
+    if not args.no_embed_thumbnail:
+        options["writethumbnail"] = True
+        postprocessors.append(
+            {
+                "key": "EmbedThumbnail",
+                "already_have_thumbnail": bool(args.write_thumbnail),
+            }
+        )
+    options["postprocessors"] = postprocessors
     return options
 
 
@@ -566,6 +588,16 @@ def build_parser() -> argparse.ArgumentParser:
         help='Audio quality for conversion. "0" is best for lossy formats. Default: 0',
     )
     parser.add_argument(
+        "--no-embed-metadata",
+        action="store_true",
+        help="Do not embed title, artist, album, date, and other available tags into audio files.",
+    )
+    parser.add_argument(
+        "--no-embed-thumbnail",
+        action="store_true",
+        help="Do not embed the thumbnail/cover art into audio files.",
+    )
+    parser.add_argument(
         "--video-container",
         default="auto",
         help="Merged video container: auto, mp4, mkv, or webm. Default: auto",
@@ -619,7 +651,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--write-thumbnail",
         action="store_true",
-        help="Save media thumbnail when available.",
+        help="Save media thumbnail as a separate file. Audio cover art is embedded by default.",
     )
     parser.add_argument(
         "--download-archive",
