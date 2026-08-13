@@ -23,6 +23,13 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
+For YouTube, keep `yt-dlp` fresh. If you see `HTTP Error 403`, `n challenge`, or age-restriction messages, update with:
+
+```powershell
+python -m pip install --upgrade -r requirements.txt
+python -m pip install --upgrade yt-dlp
+```
+
 ## Interactive Use
 
 Run the app, paste the link, then choose whether to download one item or the full playlist when the link looks like a playlist. Then choose `audio` or `video`.
@@ -179,6 +186,30 @@ python .\social_media_downloader.py "https://example.com/private-link" --mode vi
 
 Do not commit cookies or secrets. The `.gitignore` excludes common cookie filenames.
 
+## YouTube 403, Age Checks, Or N-Challenge Errors
+
+If YouTube starts writing thumbnails but every audio/video download fails with `HTTP Error 403: Forbidden`, the metadata and thumbnail side is working, but YouTube is blocking the actual media file request.
+
+Use your logged-in browser cookies:
+
+```powershell
+python .\social_media_downloader.py "https://www.youtube.com/watch?v=VIDEO_ID&list=PLAYLIST_ID" --mode audio --playlist-mode playlist --audio-format mp3 --cookies-from-browser chrome
+```
+
+The app now enables YouTube JavaScript challenge helpers automatically when a Node/Deno runtime is installed. You can choose a runtime manually:
+
+```powershell
+python .\social_media_downloader.py "URL" --mode audio --youtube-js-runtime node
+```
+
+Or disable those helpers:
+
+```powershell
+python .\social_media_downloader.py "URL" --mode audio --youtube-js-runtime none --no-youtube-remote-components
+```
+
+If interactive mode asks whether to use browser cookies, choose the browser where you are signed into YouTube, such as `chrome` or `edge`.
+
 ## Useful Options
 
 ```powershell
@@ -190,6 +221,7 @@ python .\social_media_downloader.py "URL" --mode audio --audio-format mp3
 python .\social_media_downloader.py "URL" --mode audio --audio-format mp3 --write-thumbnail
 python .\social_media_downloader.py "URL" --mode audio --playlist-mode playlist --stop-on-error
 python .\social_media_downloader.py "URL" --mode audio --playlist-mode playlist --playlist-items 1-299 --cookies-from-browser chrome
+python .\social_media_downloader.py "URL" --mode audio --playlist-mode playlist --cookies-from-browser edge --youtube-js-runtime node
 ```
 
 Playlist URLs default to asking in interactive use. In non-interactive use, pass `--playlist-mode single` or `--playlist-mode playlist` to make the choice explicit.

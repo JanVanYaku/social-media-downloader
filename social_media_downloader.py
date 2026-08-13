@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,13 +20,18 @@ SUPPORTED_PLAYLIST_MODES = {"ask", "single", "playlist"}
 SUPPORTED_AUDIO_FORMATS = {"best", "aac", "flac", "m4a", "mp3", "opus", "vorbis", "wav"}
 SUPPORTED_VIDEO_CONTAINERS = {"auto", "mkv", "mp4", "webm"}
 SUPPORTED_COOKIE_BROWSERS = {"brave", "chrome", "chromium", "edge", "firefox", "opera", "safari", "vivaldi", "whale"}
+SUPPORTED_YOUTUBE_JS_RUNTIMES = {"auto", "bun", "deno", "node", "none", "quickjs"}
 DEFAULT_VIDEO_QUALITY = "1080"
 VIDEO_QUALITY_PRESETS = ["best", "2160", "1440", "1080", "720", "480", "360", "240"]
 AUDIO_FILENAME = "%(artist,creator,uploader|Unknown Artist).120B - %(track,title|Unknown Title).120B [%(id)s].%(ext)s"
 AUDIO_PLAYLIST_FILENAME = "%(playlist_index)03d - %(artist,creator,uploader|Unknown Artist).120B - %(track,title|Unknown Title).120B [%(id)s].%(ext)s"
+YOUTUBE_REMOTE_COMPONENTS = ("ejs:github", "ejs:npm")
 
 
 class SimpleLogger:
+    def __init__(self) -> None:
+        self._youtube_help_printed = False
+
     def debug(self, msg: str) -> None:
         if msg.startswith("[debug] "):
             return
@@ -38,10 +44,26 @@ class SimpleLogger:
     def warning(self, msg: str) -> None:
         if msg:
             print(f"Warning: {msg}", file=sys.stderr)
+            self._print_youtube_help_once(msg)
 
     def error(self, msg: str) -> None:
         if msg:
             print(f"Error: {msg}", file=sys.stderr)
+            self._print_youtube_help_once(msg)
+
+    def _print_youtube_help_once(self, msg: str) -> None:
+        text = msg.lower()
+        if self._youtube_help_printed:
+            return
+        if not any(marker in text for marker in ("http error 403", "sign in to confirm your age", "n challenge", "javascript runtime")):
+            return
+        self._youtube_help_printed = True
+        print(
+            "Tip: YouTube is blocking this media request. Try browser cookies "
+            "such as --cookies-from-browser chrome, keep YouTube helpers enabled, "
+            "and update yt-dlp with: python -m pip install --upgrade yt-dlp",
+            file=sys.stderr,
+        )
 
 
 def require_ytdlp() -> Any:
@@ -95,6 +117,11 @@ def prompt_for_mode() -> str:
         print("Please type 'audio' or 'video'.")
 
 
+def is_youtube_url(url: str) -> bool:
+    host = urlparse(url).netloc.lower()
+    return "youtube.com" in host or "youtu.be" in host
+
+
 def looks_like_playlist_url(url: str) -> bool:
     """Return True when a URL appears capable of resolving to multiple items."""
 
@@ -103,7 +130,7 @@ def looks_like_playlist_url(url: str) -> bool:
     path = parsed.path.lower()
     query = parse_qs(parsed.query)
 
-    if "youtube.com" in host or "youtu.be" in host:
+    if is_youtube_url(url):
         return "list" in query or path.startswith(("/playlist", "/channel", "/c/", "/user/", "/@", "/feeds/videos.xml"))
 
     playlist_markers = (
@@ -149,6 +176,26 @@ def prompt_for_playlist_mode(url: str, args: argparse.Namespace) -> str:
         if value in {"playlist", "full", "all", "many"}:
             return "playlist"
         print("Please type 'one' or 'playlist'.")
+
+
+def prompt_for_youtube_cookies(url: str, args: argparse.Namespace) -> None:
+    """Offer browser cookies for YouTube links that may need login/age access."""
+
+    if not is_youtube_url(url) or args.cookies or args.cookies_from_browser or args.yes or args.no_youtube_cookie_prompt:
+        return
+
+    print("\nSome YouTube playlist items may need your logged-in browser session, especially age-restricted media.")
+    print("Choose a browser only if you are logged into YouTube there.")
+    choices = "skip/chrome/edge/firefox/brave"
+    while True:
+        value = input(f"Use browser cookies? [{choices}]: ").strip().lower()
+        if not value or value in {"skip", "no", "n"}:
+            return
+        if value in SUPPORTED_COOKIE_BROWSERS:
+            args.cookies_from_browser = value
+            print(f"Using YouTube cookies from {value}.")
+            return
+        print(f"Please type one of: {choices}")
 
 
 def normalize_video_quality(value: str) -> str:
@@ -214,6 +261,33 @@ def parse_rate_limit(value: str | None) -> int | None:
     return int(amount * multipliers[unit])
 
 
+def build_youtube_js_runtime_options(args: argparse.Namespace) -> dict[str, dict[str, str]]:
+    """Build yt-dlp's js_runtimes config, preferring Node when available."""
+
+    choice = args.youtube_js_runtime.strip().lower()
+    if choice == "none":
+        return {}
+
+    if choice == "auto":
+        for runtime in ("node", "deno", "bun", "quickjs"):
+            if runtime_path := shutil.which(runtime):
+                return {runtime: {"path": runtime_path}}
+        return {"node": {}, "deno": {}}
+
+    runtime_path = shutil.which(choice)
+    return {choice: {"path": runtime_path} if runtime_path else {}}
+
+
+def apply_youtube_helpers(options: dict[str, Any], args: argparse.Namespace) -> None:
+    """Enable YouTube options that reduce 403 and n-challenge failures."""
+
+    if not is_youtube_url(getattr(args, "url", "") or ""):
+        return
+    options["js_runtimes"] = build_youtube_js_runtime_options(args)
+    if not args.no_youtube_remote_components:
+        options["remote_components"] = list(YOUTUBE_REMOTE_COMPONENTS)
+
+
 def common_options(args: argparse.Namespace, audio: bool = False) -> dict[str, Any]:
     skip_playlist_errors = bool(args.allow_playlist and not getattr(args, "stop_on_error", False))
     options: dict[str, Any] = {
@@ -251,6 +325,7 @@ def common_options(args: argparse.Namespace, audio: bool = False) -> dict[str, A
         options["ratelimit"] = parse_rate_limit(args.rate_limit)
     if getattr(args, "no_check_certificate", False):
         options["nocheckcertificate"] = True
+    apply_youtube_helpers(options, args)
 
     return options
 
@@ -557,6 +632,11 @@ def validate_args(args: argparse.Namespace) -> None:
             choices = ", ".join(sorted(SUPPORTED_COOKIE_BROWSERS))
             raise SystemExit(f"--cookies-from-browser must be one of: {choices}")
 
+    args.youtube_js_runtime = args.youtube_js_runtime.strip().lower()
+    if args.youtube_js_runtime not in SUPPORTED_YOUTUBE_JS_RUNTIMES:
+        choices = ", ".join(sorted(SUPPORTED_YOUTUBE_JS_RUNTIMES))
+        raise SystemExit(f"--youtube-js-runtime must be one of: {choices}")
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -616,6 +696,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--cookies-from-browser",
         metavar="BROWSER",
         help="Load login cookies from an installed browser, such as chrome, edge, firefox, or brave.",
+    )
+    parser.add_argument(
+        "--no-youtube-cookie-prompt",
+        action="store_true",
+        help="Do not ask whether to use browser cookies on YouTube links.",
+    )
+    parser.add_argument(
+        "--youtube-js-runtime",
+        default="auto",
+        help="JavaScript runtime for YouTube challenge solving: auto, node, deno, bun, quickjs, or none. Default: auto.",
+    )
+    parser.add_argument(
+        "--no-youtube-remote-components",
+        action="store_true",
+        help="Do not allow yt-dlp to fetch official YouTube challenge helper components.",
     )
     parser.add_argument(
         "--allow-playlist",
@@ -698,12 +793,14 @@ def main() -> int:
     )
 
     url = validate_url(args.url) if args.url else prompt_for_url()
+    args.url = url
     playlist_mode = prompt_for_playlist_mode(url, args)
     args.allow_playlist = playlist_mode == "playlist"
     if playlist_mode == "playlist":
         print("Playlist mode: full playlist will be downloaded.")
     else:
         print("Playlist mode: one song/video only.")
+    prompt_for_youtube_cookies(url, args)
 
     media_info = None
     if not args.no_preview:
