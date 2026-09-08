@@ -1,9 +1,10 @@
 #######################################################################
 # Author: Lehlohonolo Adolf Matobakele  
 # Email: lehlohonolo.matobakele@gov.ls
-# Contacxt: 00266 62320704
+# Contact: 00266 62320704
 #######################################################################
-yt-dlp>=2026.3.17
+yt-dlp>=2026.8.19
+certifi>=2026.7.22
 imageio-ffmpeg>=0.5.1
 mutagen>=1.47.0
 

@@ -1,11 +1,12 @@
 #######################################################################
 # Author: Lehlohonolo Adolf Matobakele  
 # Email: lehlohonolo.matobakele@gov.ls
-# Contacxt: 00266 62320704
+# Contact: 00266 62320704
 #######################################################################
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import shutil
 import sys
@@ -25,12 +26,19 @@ DEFAULT_VIDEO_QUALITY = "1080"
 VIDEO_QUALITY_PRESETS = ["best", "2160", "1440", "1080", "720", "480", "360", "240"]
 AUDIO_FILENAME = "%(artist,creator,uploader|Unknown Artist).120B - %(track,title|Unknown Title).120B [%(id)s].%(ext)s"
 AUDIO_PLAYLIST_FILENAME = "%(playlist_index)03d - %(artist,creator,uploader|Unknown Artist).120B - %(track,title|Unknown Title).120B [%(id)s].%(ext)s"
+MIN_YTDLP_VERSION = (2026, 8, 19)
+MIN_YTDLP_VERSION_TEXT = "2026.08.19"
 YOUTUBE_REMOTE_COMPONENTS = ("ejs:github", "ejs:npm")
+DEFAULT_YOUTUBE_PLAYER_CLIENTS = "default,-android_vr"
+BROWSER_COOKIE_ERROR_MARKERS = ("could not copy chrome cookie database", "failed to load cookies")
+_YTDLP_VERSION_WARNING_PRINTED = False
 
 
 class SimpleLogger:
     def __init__(self) -> None:
         self._youtube_help_printed = False
+        self._browser_cookie_help_printed = False
+        self.last_problem = ""
 
     def debug(self, msg: str) -> None:
         if msg.startswith("[debug] "):
@@ -39,17 +47,21 @@ class SimpleLogger:
 
     def info(self, msg: str) -> None:
         if msg:
-            print(msg)
+            print(msg, flush=True)
 
     def warning(self, msg: str) -> None:
         if msg:
-            print(f"Warning: {msg}", file=sys.stderr)
+            self.last_problem = msg
+            print(f"Warning: {msg}", file=sys.stderr, flush=True)
             self._print_youtube_help_once(msg)
+            self._print_browser_cookie_help_once(msg)
 
     def error(self, msg: str) -> None:
         if msg:
-            print(f"Error: {msg}", file=sys.stderr)
+            self.last_problem = msg
+            print(f"Error: {msg}", file=sys.stderr, flush=True)
             self._print_youtube_help_once(msg)
+            self._print_browser_cookie_help_once(msg)
 
     def _print_youtube_help_once(self, msg: str) -> None:
         text = msg.lower()
@@ -63,10 +75,28 @@ class SimpleLogger:
             "such as --cookies-from-browser chrome, keep YouTube helpers enabled, "
             "and update yt-dlp with: python -m pip install --upgrade yt-dlp",
             file=sys.stderr,
+            flush=True,
+        )
+
+    def _print_browser_cookie_help_once(self, msg: str) -> None:
+        text = msg.lower()
+        if self._browser_cookie_help_printed:
+            return
+        if not is_browser_cookie_error_text(text):
+            return
+        self._browser_cookie_help_printed = True
+        print(
+            "Tip: Browser cookies could not be read. Close Brave/Chrome completely, "
+            "export a cookies.txt file and pass --cookies, or retry public media "
+            "without --cookies-from-browser.",
+            file=sys.stderr,
+            flush=True,
         )
 
 
 def require_ytdlp() -> Any:
+    configure_ssl_cert_store()
+
     try:
         import yt_dlp
     except ImportError as exc:
@@ -75,7 +105,60 @@ def require_ytdlp() -> Any:
             "  python -m pip install -r requirements.txt"
         ) from exc
 
+    warn_if_outdated_ytdlp(yt_dlp)
     return yt_dlp
+
+
+def configure_ssl_cert_store() -> None:
+    """Use certifi's CA bundle when this Python install has no working default."""
+
+    if os.environ.get("SSL_CERT_FILE"):
+        return
+
+    try:
+        import certifi
+    except ImportError:
+        return
+
+    os.environ["SSL_CERT_FILE"] = certifi.where()
+
+
+def warn_if_outdated_ytdlp(yt_dlp: Any) -> None:
+    global _YTDLP_VERSION_WARNING_PRINTED
+
+    if _YTDLP_VERSION_WARNING_PRINTED:
+        return
+
+    try:
+        from yt_dlp import version as ytdlp_version
+
+        current = getattr(ytdlp_version, "__version__", "0")
+    except Exception:
+        return
+
+    if parse_version_tuple(current) < MIN_YTDLP_VERSION:
+        print(
+            f"Warning: yt-dlp {current} is installed. YouTube download fixes need "
+            f"yt-dlp {MIN_YTDLP_VERSION_TEXT} or newer. Update with:\n"
+            "  python -m pip install --upgrade yt-dlp",
+            file=sys.stderr,
+        )
+        _YTDLP_VERSION_WARNING_PRINTED = True
+
+
+def parse_version_tuple(value: str) -> tuple[int, int, int]:
+    parts = [int(part) for part in re.findall(r"\d+", value)[:3]]
+    return tuple((parts + [0, 0, 0])[:3])
+
+
+def enable_line_buffered_output() -> None:
+    """Keep progress, warnings, and prompts in a sensible order on Windows."""
+
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(line_buffering=True)
+        except (AttributeError, OSError):
+            pass
 
 
 def get_ffmpeg_location() -> str | None:
@@ -90,8 +173,26 @@ def get_ffmpeg_location() -> str | None:
         return None
 
 
+def clean_pasted_url(url: str) -> str:
+    """Accept raw URLs and common Markdown/autolink text copied from chats."""
+
+    cleaned = url.strip().strip("\"'").strip()
+
+    markdown = re.fullmatch(r"\[[^\]]+\]\((https?://[^)\s]+)\)", cleaned)
+    if markdown:
+        cleaned = markdown.group(1)
+    elif cleaned.startswith("<") and cleaned.endswith(">"):
+        cleaned = cleaned[1:-1].strip()
+    else:
+        first_url = re.search(r"https?://[^\s<>\"]+", cleaned)
+        if first_url and cleaned != first_url.group(0):
+            cleaned = first_url.group(0)
+
+    return cleaned.rstrip(".,;")
+
+
 def validate_url(url: str) -> str:
-    cleaned = url.strip()
+    cleaned = clean_pasted_url(url)
     parsed = urlparse(cleaned)
 
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -278,11 +379,50 @@ def build_youtube_js_runtime_options(args: argparse.Namespace) -> dict[str, dict
     return {choice: {"path": runtime_path} if runtime_path else {}}
 
 
+def split_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+def is_browser_cookie_error_text(text: str) -> bool:
+    lowered = text.lower()
+    return any(marker in lowered for marker in BROWSER_COOKIE_ERROR_MARKERS)
+
+
+def retry_without_browser_cookies(exc: Exception, args: argparse.Namespace) -> bool:
+    if not getattr(args, "cookies_from_browser", None):
+        return False
+    if getattr(args, "_browser_cookie_fallback_used", False):
+        return False
+    if not is_browser_cookie_error_text(str(exc)):
+        return False
+
+    browser = args.cookies_from_browser
+    args.cookies_from_browser = None
+    args._browser_cookie_fallback_used = True
+    print(
+        f"Browser cookies from {browser} could not be loaded. Retrying without browser cookies.",
+        file=sys.stderr,
+        flush=True,
+    )
+    print(
+        "If this media requires login, close the browser completely or export a cookies.txt file "
+        "and pass it with --cookies.",
+        file=sys.stderr,
+        flush=True,
+    )
+    return True
+
+
 def apply_youtube_helpers(options: dict[str, Any], args: argparse.Namespace) -> None:
     """Enable YouTube options that reduce 403 and n-challenge failures."""
 
     if not is_youtube_url(getattr(args, "url", "") or ""):
         return
+    player_clients = split_csv(args.youtube_player_client)
+    if player_clients:
+        extractor_args = options.setdefault("extractor_args", {})
+        youtube_args = extractor_args.setdefault("youtube", {})
+        youtube_args["player_client"] = player_clients
     options["js_runtimes"] = build_youtube_js_runtime_options(args)
     if not args.no_youtube_remote_components:
         options["remote_components"] = list(YOUTUBE_REMOTE_COMPONENTS)
@@ -539,14 +679,29 @@ def prompt_for_audio_format(args: argparse.Namespace) -> str:
 
 def preview_media(url: str, args: argparse.Namespace) -> dict[str, Any] | None:
     yt_dlp = require_ytdlp()
+    options = metadata_options(args)
+    logger = options.get("logger")
     try:
-        with yt_dlp.YoutubeDL(metadata_options(args)) as ydl:
+        with yt_dlp.YoutubeDL(options) as ydl:
             info = ydl.extract_info(url, download=False)
             if isinstance(info, dict):
                 print_media_preview(ydl.sanitize_info(info))
                 return info
+            problem = getattr(logger, "last_problem", "") or "No media metadata was returned."
+            exc = RuntimeError(problem)
+            if retry_without_browser_cookies(exc, args):
+                return preview_media(url, args)
+            print(
+                f"Could not preview media before download: {exc}{download_failure_guidance(exc, args)}",
+                file=sys.stderr,
+            )
     except Exception as exc:
-        print(f"Could not preview media before download: {exc}", file=sys.stderr)
+        if retry_without_browser_cookies(exc, args):
+            return preview_media(url, args)
+        print(
+            f"Could not preview media before download: {exc}{download_failure_guidance(exc, args)}",
+            file=sys.stderr,
+        )
     return None
 
 
@@ -565,13 +720,50 @@ def confirm_download(mode: str, args: argparse.Namespace) -> None:
         raise SystemExit("Cancelled.")
 
 
-def download_media(url: str, mode: str, args: argparse.Namespace) -> None:
-    yt_dlp = require_ytdlp()
+def download_failure_guidance(exc: Exception, args: argparse.Namespace) -> str:
+    text = str(exc).lower()
+    guidance: list[str] = []
 
+    if is_browser_cookie_error_text(text):
+        guidance.extend(
+            [
+                "",
+                "Browser cookies could not be loaded.",
+                "- Close Brave/Chrome completely, then retry with --cookies-from-browser brave.",
+                "- For public media, retry without --cookies-from-browser brave.",
+                "- For login-only media, export a Netscape cookies.txt file and pass it with --cookies.",
+            ]
+        )
+
+    if is_youtube_url(getattr(args, "url", "") or "") and ("http error 403" in text or "forbidden" in text):
+        guidance.extend(
+            [
+                "",
+                "YouTube blocked the media stream request.",
+                f"- Make sure yt-dlp is at least {MIN_YTDLP_VERSION_TEXT}: python -m pip install --upgrade yt-dlp",
+                "- If you can play the video in Brave, retry with: --cookies-from-browser brave",
+                f"- The app now avoids the old android_vr client by default: --youtube-player-client {DEFAULT_YOUTUBE_PLAYER_CLIENTS}",
+            ]
+        )
+
+    if "certificate_verify_failed" in text or "certificate verify failed" in text:
+        guidance.extend(
+            [
+                "",
+                "Your Python HTTPS certificate store rejected the site certificate.",
+                "- First try updating yt-dlp and Python certificates.",
+                "- As a last resort for this machine, retry with: --no-check-certificate",
+            ]
+        )
+
+    return "\n".join(guidance)
+
+
+def download_media(url: str, mode: str, args: argparse.Namespace) -> None:
     if mode == "audio":
-        options = audio_options(args)
+        build_options = audio_options
     elif mode == "video":
-        options = video_options(args)
+        build_options = video_options
     else:
         raise SystemExit("Mode must be audio or video.")
 
@@ -589,11 +781,18 @@ def download_media(url: str, mode: str, args: argparse.Namespace) -> None:
     if args.allow_playlist and not args.stop_on_error:
         print("Playlist safety: unavailable, deleted, or private items will be skipped.")
 
-    try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            ydl.download([url])
-    except Exception as exc:
-        raise SystemExit(f"Download failed: {exc}") from exc
+    while True:
+        yt_dlp = require_ytdlp()
+        options = build_options(args)
+
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                ydl.download([url])
+        except Exception as exc:
+            if retry_without_browser_cookies(exc, args):
+                continue
+            raise SystemExit(f"Download failed: {exc}{download_failure_guidance(exc, args)}") from exc
+        break
 
     print("\nDownload complete.")
 
@@ -636,6 +835,10 @@ def validate_args(args: argparse.Namespace) -> None:
     if args.youtube_js_runtime not in SUPPORTED_YOUTUBE_JS_RUNTIMES:
         choices = ", ".join(sorted(SUPPORTED_YOUTUBE_JS_RUNTIMES))
         raise SystemExit(f"--youtube-js-runtime must be one of: {choices}")
+
+    args.youtube_player_client = args.youtube_player_client.strip()
+    if not args.youtube_player_client:
+        raise SystemExit("--youtube-player-client cannot be empty.")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -706,6 +909,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--youtube-js-runtime",
         default="auto",
         help="JavaScript runtime for YouTube challenge solving: auto, node, deno, bun, quickjs, or none. Default: auto.",
+    )
+    parser.add_argument(
+        "--youtube-player-client",
+        default=DEFAULT_YOUTUBE_PLAYER_CLIENTS,
+        help=(
+            "Comma-separated YouTube clients for yt-dlp. Default: "
+            f"{DEFAULT_YOUTUBE_PLAYER_CLIENTS}"
+        ),
     )
     parser.add_argument(
         "--no-youtube-remote-components",
@@ -783,6 +994,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    enable_line_buffered_output()
+
     parser = build_parser()
     args = parser.parse_args()
     validate_args(args)

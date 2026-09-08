@@ -1,7 +1,7 @@
 #######################################################################
 # Author: Lehlohonolo Adolf Matobakele  
 # Email: lehlohonolo.matobakele@gov.ls
-# Contacxt: 00266 62320704
+# Contact: 00266 62320704
 #######################################################################
 # Social Media Downloader App
 
@@ -29,6 +29,8 @@ For YouTube, keep `yt-dlp` fresh. If you see `HTTP Error 403`, `n challenge`, or
 python -m pip install --upgrade -r requirements.txt
 python -m pip install --upgrade yt-dlp
 ```
+
+This project currently requires `yt-dlp>=2026.8.19` because older builds can select YouTube player clients that return `HTTP Error 403` during the video/audio stream download.
 
 ## Interactive Use
 
@@ -190,13 +192,25 @@ Do not commit cookies or secrets. The `.gitignore` excludes common cookie filena
 
 If YouTube starts writing thumbnails but every audio/video download fails with `HTTP Error 403: Forbidden`, the metadata and thumbnail side is working, but YouTube is blocking the actual media file request.
 
+First update yt-dlp:
+
+```powershell
+python -m pip install --upgrade yt-dlp
+```
+
 Use your logged-in browser cookies:
 
 ```powershell
-python .\social_media_downloader.py "https://www.youtube.com/watch?v=VIDEO_ID&list=PLAYLIST_ID" --mode audio --playlist-mode playlist --audio-format mp3 --cookies-from-browser chrome
+python .\social_media_downloader.py "https://www.youtube.com/watch?v=VIDEO_ID&list=PLAYLIST_ID" --mode video --video-quality 720 --cookies-from-browser brave
 ```
 
-The app now enables YouTube JavaScript challenge helpers automatically when a Node/Deno runtime is installed. You can choose a runtime manually:
+The app now avoids the old failing `android_vr` YouTube client by default. You can choose player clients manually:
+
+```powershell
+python .\social_media_downloader.py "URL" --mode video --youtube-player-client default,-android_vr
+```
+
+The app also enables YouTube JavaScript challenge helpers automatically when a Node/Deno runtime is installed. You can choose a runtime manually:
 
 ```powershell
 python .\social_media_downloader.py "URL" --mode audio --youtube-js-runtime node
@@ -208,7 +222,25 @@ Or disable those helpers:
 python .\social_media_downloader.py "URL" --mode audio --youtube-js-runtime none --no-youtube-remote-components
 ```
 
-If interactive mode asks whether to use browser cookies, choose the browser where you are signed into YouTube, such as `chrome` or `edge`.
+If interactive mode asks whether to use browser cookies, choose the browser where you are signed into YouTube, such as `brave`, `chrome`, or `edge`.
+
+`certifi` is included so yt-dlp has a current certificate bundle available. If your machine still reports `certificate verify failed`, refresh the installed dependencies:
+
+```powershell
+python -m pip install --upgrade -r requirements.txt
+```
+
+As a last resort on your own machine, you can pass `--no-check-certificate`:
+
+```powershell
+python .\social_media_downloader.py "URL" --mode video --video-quality 720 --cookies-from-browser brave --no-check-certificate
+```
+
+If Brave/Chrome cookies fail with `Could not copy Chrome cookie database`, the browser is usually holding the cookie database open. The app will retry public media without browser cookies automatically. For login-only media, close every Brave window and background process, then retry; or export a Netscape `cookies.txt` file and use:
+
+```powershell
+python .\social_media_downloader.py "URL" --mode video --video-quality 720 --cookies .\cookies.txt --no-check-certificate
+```
 
 ## Useful Options
 
@@ -222,6 +254,10 @@ python .\social_media_downloader.py "URL" --mode audio --audio-format mp3 --writ
 python .\social_media_downloader.py "URL" --mode audio --playlist-mode playlist --stop-on-error
 python .\social_media_downloader.py "URL" --mode audio --playlist-mode playlist --playlist-items 1-299 --cookies-from-browser chrome
 python .\social_media_downloader.py "URL" --mode audio --playlist-mode playlist --cookies-from-browser edge --youtube-js-runtime node
+python .\social_media_downloader.py "URL" --mode video --video-quality 720 --cookies-from-browser brave
+python .\social_media_downloader.py "URL" --mode video --video-quality 720 --cookies-from-browser brave --no-check-certificate
+python .\social_media_downloader.py "URL" --mode video --video-quality 720 --cookies .\cookies.txt --no-check-certificate
+python .\social_media_downloader.py "URL" --mode video --youtube-player-client default,-android_vr
 ```
 
 Playlist URLs default to asking in interactive use. In non-interactive use, pass `--playlist-mode single` or `--playlist-mode playlist` to make the choice explicit.
